@@ -1,7 +1,6 @@
 import concurrent.futures
 import csv
 import json
-import time
 
 import numpy as np
 import requests
@@ -20,23 +19,37 @@ def scrape_ids_from_imdb(URL):
     return(list_of_ids)
 
 
+def scrape_imdb_page(URL):
+    page = requests.get(URL)
+    soup = BeautifulSoup(page.content, "lxml")
+    return soup
+
+
 def main():
-    entries_to_scrape = 50
+    entries_to_scrape = 500
     no_of_pages = entries_to_scrape//50
     num = 0
-    baseURL = "http://www.imdb.com/search/title"
-    L = []
-    start = time.perf_counter()
+    baseURL = "http://www.imdb.com/"
+    imdb_ids = []
+    imdb_links = []
 
     for i in tqdm.trange(no_of_pages):
         num = i*50
-        addr = f"/?year=2005-01-01,2021-12-31&view=simple&start={num}"
-        L.append(scrape_ids_from_imdb(baseURL+addr))
+        addr = "search/title/?year=2005-01-01,2021-12-31&view=simple&start="
+        imdb_ids.append(scrape_ids_from_imdb(baseURL+addr+str(num)))
 
-    imdb_ids = np.array(L).flatten()
-    print(imdb_ids)
-    finish = time.perf_counter()
-    print(finish-start)
+    imdb_ids = np.array(imdb_ids).flatten()
+    print(imdb_ids.shape)
+
+    for ID in imdb_ids:
+        imdb_links.append(f"{baseURL}title/{ID}")
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        i = 0
+        results = executor.map(scrape_imdb_page, imdb_links)
+        for result in results:
+            i += 1
+            print(i)
 
 
 if __name__ == '__main__':
