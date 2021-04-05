@@ -1,6 +1,4 @@
 import concurrent.futures
-import csv
-import json
 
 import numpy as np
 import requests
@@ -21,12 +19,13 @@ def scrape_ids_from_imdb(URL):
 
 def scrape_imdb_page(URL):
     page = requests.get(URL)
-    soup = BeautifulSoup(page.content, "lxml")
-    return soup
+    strainer = SoupStrainer('script', type="application/ld+json")
+    soup = BeautifulSoup(page.content, "lxml", parse_only=strainer)
+    print(str(soup.contents[1])[35:-9])
 
 
 def main():
-    entries_to_scrape = 500
+    entries_to_scrape = 50
     no_of_pages = entries_to_scrape//50
     num = 0
     baseURL = "http://www.imdb.com/"
@@ -39,7 +38,6 @@ def main():
         imdb_ids.append(scrape_ids_from_imdb(baseURL+addr+str(num)))
 
     imdb_ids = np.array(imdb_ids).flatten()
-    print(imdb_ids.shape)
 
     for ID in imdb_ids:
         imdb_links.append(f"{baseURL}title/{ID}")
@@ -48,9 +46,7 @@ def main():
         i = 0
         results = executor.map(scrape_imdb_page, imdb_links)
         for result in results:
-            i += 1
-            print(i)
-
+            pass
 
 if __name__ == '__main__':
     main()
