@@ -1,5 +1,6 @@
 import concurrent.futures
-
+import json
+from multipledispatch import dispatch
 import numpy as np
 import requests
 import tqdm
@@ -21,7 +22,9 @@ def scrape_imdb_page(URL):
     page = requests.get(URL)
     strainer = SoupStrainer('script', type="application/ld+json")
     soup = BeautifulSoup(page.content, "lxml", parse_only=strainer)
-    print(str(soup.contents[1])[35:-9])
+    scriptAPI = str(soup.contents[1])[35:-9]
+    jsonStuffs = json.loads(scriptAPI)
+    print(jsonStuffs)
 
 
 def main():
