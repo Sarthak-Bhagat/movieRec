@@ -1,5 +1,6 @@
 import concurrent.futures
 import json
+import pandas as pd
 from multipledispatch import dispatch
 import numpy as np
 import requests
@@ -18,13 +19,44 @@ def scrape_ids_from_imdb(URL):
     return(list_of_ids)
 
 
+@dispatch(dict, str)
+def getStuffs(JSON, field):
+    try:
+        return JSON[field]
+    except:
+        return ""
+
+
+@dispatch(dict, str, str)
+def getStuffs(JSON, field, field2):
+    try:
+        return JSON[field][field2]
+    except:
+        return ""
+
+
 def scrape_imdb_page(URL):
     page = requests.get(URL)
     strainer = SoupStrainer('script', type="application/ld+json")
     soup = BeautifulSoup(page.content, "lxml", parse_only=strainer)
     scriptAPI = str(soup.contents[1])[35:-9]
     jsonStuffs = json.loads(scriptAPI)
-    print(jsonStuffs)
+    columns = ['IMDB ID', 'Type', 'Genre', 'Actors', 'Director', 'Description', 'Date Published', 'Keywords', 'Number of Ratings', 'Rating', 'Image Url']
+
+    movie_or_show = getStuffs(jsonStuffs, "@type")
+    imdb_id = getStuffs(jsonStuffs, "url")[7:-1]
+    image_url = getStuffs(jsonStuffs, "image")
+    genre = getStuffs(jsonStuffs, "genre")
+    actors = getStuffs(jsonStuffs, "actor")
+    director = getStuffs(jsonStuffs, "director")
+    creator = getStuffs(jsonStuffs, "creator")
+    description = getStuffs(jsonStuffs, "description")
+    datePublished = getStuffs(jsonStuffs, "datePublished")
+    keywords = getStuffs(jsonStuffs, "keywords")
+    totalRatings = getStuffs(jsonStuffs, "aggregateRating", "ratingCount")
+    ratingValue = getStuffs(jsonStuffs, "aggregateRating", "ratingValue")
+    df = pd.DataFrame([imdb_id, movie_or_show, genre, actors, director, description, datePublished, keywords, totalRatings, ratingValue, image_url], columns=columns)
+    print(df)
 
 
 def main():
@@ -50,6 +82,7 @@ def main():
         results = executor.map(scrape_imdb_page, imdb_links)
         for result in results:
             pass
+
 
 if __name__ == '__main__':
     main()
