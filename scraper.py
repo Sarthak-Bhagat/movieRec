@@ -4,23 +4,23 @@ import pandas as pd
 import numpy as np
 import requests
 from lxml import html
-from tqdm import tqdm,trange
+from tqdm import tqdm, trange
 from bs4 import BeautifulSoup, SoupStrainer
 
 
 def scrape_ids_from_imdb(URL):
     page = requests.get(URL)
     tree = html.fromstring(page.content)
-    list_of_ids= tree.xpath('//*[@id="main"]/div/div[3]/div/div/div[2]/div/div[1]/span/span[2]/a/@href')
+    list_of_ids = tree.xpath('//*[@id="main"]/div/div[3]/div/div/div[2]/div/div[1]/span/span[2]/a/@href')
     return(list_of_ids)
 
 
-def getStuffs(JSON, field, field2 = ""):
+def getStuffs(JSON, field, field2=""):
     try:
         if field2 != "":
             return JSON[field][field2]
         return JSON[field]
-    except:
+    except ValueError:
         return ""
 
 
@@ -52,7 +52,7 @@ def scrape_imdb_page(URL):
 
 def main():
     columns = ['IMDB ID', 'Type', 'Genre', 'Actors', 'Director', 'Description', 'Date Published', 'Keywords', 'Number of Ratings', 'Rating', 'Image Url', 'External links']
-    entries_to_scrape = 100 
+    entries_to_scrape = 100
     no_of_pages = entries_to_scrape//50
     num = 0
     baseURL = "http://www.imdb.com"
@@ -74,7 +74,7 @@ def main():
         results = list(tqdm(executor.map(scrape_imdb_page, imdb_links), total=entries_to_scrape))
         for result in results:
             df = pd.concat([df, result], ignore_index=True)
-    df.to_csv('uwu.csv',index=False)
+    df.to_csv('uwu.csv', index=False)
 
 
 if __name__ == '__main__':
