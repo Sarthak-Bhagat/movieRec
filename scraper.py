@@ -36,12 +36,13 @@ def scrape_imdb_page(url):
     script_api = str(soup.contents[1])[35:-9]
     json_stuffs = json.loads(script_api)
     tree = html.fromstring(page.content)
-    columns = ['IMDB ID', 'Type', 'Genre', 'Actors', 'Director', 'Description', 'Date Published', 'Keywords',
+    columns = ['IMDB ID', 'Title', 'Type', 'Genre', 'Actors', 'Director', 'Description', 'Date Published', 'Keywords',
                'Number of Ratings', 'Rating', 'Image Url', 'External links']
 
     links = tree.xpath('//*[@id="titleDetails"]/div[1]/a/@href')
     keywords = tree.xpath('//*[@id="titleStoryLine"]/div[2]/a/span/text()')
     movie_or_show = get_stuffs(json_stuffs, "@type")
+    title = get_stuffs(json_stuffs, "name")
     imdb_id = get_stuffs(json_stuffs, "url")[7:-1]
     image_url = get_stuffs(json_stuffs, "image")
     genre = get_stuffs(json_stuffs, "genre")
@@ -52,15 +53,15 @@ def scrape_imdb_page(url):
     total_ratings = get_stuffs(json_stuffs, "aggregateRating", "ratingCount")
     rating_value = get_stuffs(json_stuffs, "aggregateRating", "ratingValue")
 
-    df = pd.DataFrame([[imdb_id, movie_or_show, genre, actors, director, description, date_published, keywords,
+    df = pd.DataFrame([[imdb_id, title, movie_or_show, genre, actors, director, description, date_published, keywords,
                         total_ratings, rating_value, image_url, links]], columns=columns)
     return df
 
 
 def main():
-    columns = ['IMDB ID', 'Type', 'Genre', 'Actors', 'Director', 'Description', 'Date Published', 'Keywords',
+    columns = ['IMDB ID', 'Title', 'Type', 'Genre', 'Actors', 'Director', 'Description', 'Date Published', 'Keywords',
                'Number of Ratings', 'Rating', 'Image Url', 'External links']
-    entries_to_scrape = 20000
+    entries_to_scrape = 50
     no_of_pages = entries_to_scrape // 50
     base_url = "http://www.imdb.com"
     imdb_ids = []
