@@ -57,7 +57,6 @@ def main():
     columns = ['IMDB ID', 'Type', 'Genre', 'Actors', 'Director', 'Description', 'Date Published', 'Keywords', 'Number of Ratings', 'Rating', 'Image Url', 'External links']
     entries_to_scrape = 15000
     no_of_pages = entries_to_scrape//50
-    num = 0
     baseURL = "http://www.imdb.com"
     imdb_ids = []
     imdb_links = []
@@ -65,7 +64,6 @@ def main():
     df = pd.DataFrame(columns=columns)
 
     for i in trange(no_of_pages):
-        num = i*50
         Z, addr = scrape_ids_from_imdb(addr)
         addr = baseURL+addr
         imdb_ids.append(Z)
