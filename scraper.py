@@ -2,22 +2,46 @@ import concurrent.futures
 import json
 
 import numpy as np
-import pandas as pd
+import psycopg2
 import requests
 # noinspection PyProtectedMember
 from bs4 import BeautifulSoup, SoupStrainer
 from lxml import html
+from psycopg2 import Error
 from tqdm import tqdm, trange
 
 from apiCreds import key
+from sqlCreds import database, host, password, port, username
+
+global connection
+try:
+    connection = psycopg2.connect(user=username,
+                                  password=password,
+                                  host=host,
+                                  port=port,
+                                  database=database)
+
+    # Create a cursor to perform database operations
+    cursor = connection.cursor()
+    print("PostgreSQL server information")
+    print(connection.get_dsn_parameters(), "\n")
+    cursor.execute("SELECT version();")
+    record = cursor.fetchone()
+    print("You are connected to - ", record, "\n")
+    cursor.close()
+
+except (Exception, Error) as error:
+    print("Error while connecting to PostgreSQL", error)
 
 
 def scrape_ids_from_imdb(url):
+    path = '//*[@id="main"]/div/div[1]/div[2]/a[2]/@href'
     if not url:
         url = 'http://www.imdb.com/search/title/?year=2005-01-01,2021-12-31&view=simple&start=0'
+        path = '//*[@id="main"]/div/div[1]/div[2]/a/@href'
     tree = html.fromstring(requests.get(url).content)
     list_of_ids = tree.xpath('//*[@id="main"]/div/div[3]/div/div/div[2]/div/div[1]/span/span[2]/a/@href')
-    address = tree.xpath('//*[@id="main"]/div/div[1]/div[2]/a/@href')
+    address = tree.xpath(path)
     return list_of_ids, address[0]
 
 
@@ -37,33 +61,40 @@ def scrape_imdb_page(url):
     script_api = str(soup.contents[1])[35:-9]
     json_stuffs = json.loads(script_api)
     tree = html.fromstring(page.content)
-    columns = ['IMDB ID', 'Title', 'Type', 'Genre', 'Actors', 'Director', 'Description', 'Date Published', 'Keywords',
-               'Number of Ratings', 'Rating', 'External links', 'TMDB ID', 'TMDB Rating', 'TMDB Rating Count',
-               "Image URL"]
     actor_names = []
     director_names = []
-    creator_names = []
 
     links = tree.xpath('//*[@id="titleDetails"]/div[1]/a/@href')
     keywords = tree.xpath('//*[@id="titleStoryLine"]/div[2]/a/span/text()')
-    isMovie = True if get_stuffs(json_stuffs, "@type") == 'Movie' else False
-    title = get_stuffs(json_stuffs, "name")
+    isMovie = 'True' if get_stuffs(json_stuffs, "@type") == 'Movie' else 'False'
+    title = get_stuffs(json_stuffs, "name").replace("'", "\\'")
     imdb_id = get_stuffs(json_stuffs, "url")[7:-1]
     image_url = get_stuffs(json_stuffs, "image")
     genre = get_stuffs(json_stuffs, "genre")
     actors = get_stuffs(json_stuffs, "actor")
     directors = get_stuffs(json_stuffs, "director")
     creators = get_stuffs(json_stuffs, "creator")
-    description = get_stuffs(json_stuffs, "description")
+    description = get_stuffs(json_stuffs, "description").replace("'", "\\'")
     date_published = get_stuffs(json_stuffs, "datePublished")
     total_ratings = get_stuffs(json_stuffs, "aggregateRating", "ratingCount")
     rating_value = get_stuffs(json_stuffs, "aggregateRating", "ratingValue")
+    total_ratings = total_ratings if total_ratings else 0
+    rating_value = rating_value if rating_value else 0
+    tmdb_id = None
+    tmdb_rating = 0
+    tmdb_rating_count = 0
+
+    genre = [genre] if isinstance(genre, str) else genre
 
     if isinstance(directors, dict):
-        director_names.append(directors['name'])
+        s = str(directors['name'])
+        s = s.replace("'", "\\'")
+        director_names.append(s)
     elif isinstance(directors, list):
         for director in directors:
-            director_names.append(director['name'])
+            s = str(director['name'])
+            s = s.replace("'", "\\'")
+            director_names.append(s)
 
     if isinstance(creators, list):
         for creator in creators:
@@ -73,40 +104,54 @@ def scrape_imdb_page(url):
                 continue
 
     for i in actors:
-        actor_names.append(i['name'])
+        s = str(i['name'])
+        s = s.replace("'", "\\'")
+        actor_names.append(s)
 
-    id_type = 'movie' if isMovie else 'tv'
+    id_type = 'movie' if isMovie == 'True' else 'tv'
     api_link = f'https://api.themoviedb.org/3/find/{imdb_id}?api_key={key}&language=en-US&external_source=imdb_id'
     api_output = json.loads(requests.get(api_link).content)
-    tmdb_id = (api_output['tv_results'] + api_output['movie_results'])[0]['id']
-    api_link = f'https://api.themoviedb.org/3/{id_type}/{imdb_id}?api_key={key}&language=en-US'
-    api_output = json.loads(requests.get(api_link).content)
-
     try:
-        tmdb_rating = api_output['vote_average']
-        tmdb_rating_count = api_output['vote_count']
-    except KeyError:
-        tmdb_rating = 0
-        tmdb_rating_count = 0
+        tmdb_id = (api_output['tv_results'] + api_output['movie_results'])[0]['id']
+    except IndexError:
+        pass
 
-    df = pd.DataFrame(
-        [[imdb_id, title, isMovie, genre, actor_names, director_names, description, date_published, keywords,
-          total_ratings, rating_value, links, tmdb_id, tmdb_rating, tmdb_rating_count, image_url]],
-        columns=columns)
-    return df
+    if tmdb_id:
+        api_link = f'https://api.themoviedb.org/3/{id_type}/{imdb_id}?api_key={key}&language=en-US'
+        api_output = json.loads(requests.get(api_link).content)
+
+        try:
+            tmdb_rating = api_output['vote_average']
+            tmdb_rating_count = api_output['vote_count']
+        except KeyError:
+            tmdb_rating = 0
+            tmdb_rating_count = 0
+
+    genre = ",".join(genre)
+    actor_names = ",".join(actor_names)
+    director_names = ",".join(director_names)
+    keywords = ",".join(keywords).replace("'", "\\'")
+    links = ",".join(links)
+    # columns = ['IMDB ID', 'Title', 'Is a Movie', 'Genre', 'Actors', 'Director', 'Description', 'Date Published',
+    #            'Keywords', 'Number of Ratings', 'Rating', 'External links', 'TMDB ID', 'TMDB Rating',
+    #            'TMDB Rating Count', "Image URL"]
+
+    with connection.cursor() as cur:
+        try:
+            cur.execute(
+                f"""INSERT INTO "Everything" ("IMDB ID", "TMDB Rating Count", "TMDB Rating", "Ratings", "Number of Ratings", "Image URL", "External Links", "Keywords", "Date Published", "Directors", "Actors", "Genre", "isMovie", "Title", "Plot", "TMDB ID") VALUES ('{imdb_id}', {tmdb_rating_count}, {tmdb_rating}, {rating_value}, {total_ratings}, '{image_url}', '{links}', E'{keywords}', '{date_published}', E'{director_names}', E'{actor_names}', '{genre}', {isMovie}, E'{title}', E'{description}', '{tmdb_id}') ON CONFLICT DO NOTHING ;""")
+        except:
+            pass
+        connection.commit()
 
 
 def main():
-    columns = ['IMDB ID', 'Title', 'Type', 'Genre', 'Actors', 'Director', 'Description', 'Date Published', 'Keywords',
-               'Number of Ratings', 'Rating', 'External links', 'TMDB ID', 'TMDB Rating', 'TMDB Rating Count',
-               "Image URL"]
-    entries_to_scrape = 100
+    entries_to_scrape = 1000
     no_of_pages = entries_to_scrape // 50
     base_url = "http://www.imdb.com"
     imdb_ids = []
     imdb_links = []
     addr = None
-    imdb_database = pd.DataFrame(columns=columns)
 
     for _ in trange(no_of_pages):
         # TODO mulltithread the first 200 pages
@@ -115,16 +160,16 @@ def main():
         imdb_ids.append(scraped_ids)
 
     imdb_ids = np.array(imdb_ids).flatten()
-
     for ID in imdb_ids:
         imdb_links.append(base_url + ID)
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        results = list(tqdm(executor.map(scrape_imdb_page, imdb_links), total=entries_to_scrape))
-        for result in results:
-            imdb_database = pd.concat([imdb_database, result], ignore_index=True)
+        _ = list(tqdm(executor.map(scrape_imdb_page, imdb_links), total=entries_to_scrape))
 
-    imdb_database.to_csv('uwu.csv', mode='w+', index=False)
+    if connection:
+        cursor.close()
+        connection.close()
+        print("PostgreSQL connection is closed")
 
 
 if __name__ == '__main__':
