@@ -11,15 +11,14 @@ from psycopg2 import Error
 from tqdm import tqdm, trange
 
 from apiCreds import key
-from sqlCreds import database, host, password, port, username
 
 global connection
 try:
-    connection = psycopg2.connect(user=username,
-                                  password=password,
-                                  host=host,
-                                  port=port,
-                                  database=database)
+    connection = psycopg2.connect(user='PyCharm',
+                                  password='123456',
+                                  host="127.0.0.1",
+                                  port=5432,
+                                  database="Movie Rec")
 
     # Create a cursor to perform database operations
     cursor = connection.cursor()
@@ -35,14 +34,18 @@ except (Exception, Error) as error:
 
 
 def scrape_ids_from_imdb(url):
-    path = '//*[@id="main"]/div/div[1]/div[2]/a[2]/@href'
+    path = '//*[@id="main"]/div/div[1]/div[2]/a/@href'
     if not url:
         url = 'http://www.imdb.com/search/title/?year=2005-01-01,2021-12-31&view=simple&start=0'
         path = '//*[@id="main"]/div/div[1]/div[2]/a/@href'
     tree = html.fromstring(requests.get(url).content)
     list_of_ids = tree.xpath('//*[@id="main"]/div/div[3]/div/div/div[2]/div/div[1]/span/span[2]/a/@href')
     address = tree.xpath(path)
-    return list_of_ids, address[0]
+    if len(address) == 2:
+        address = address[1]
+    else:
+        address = address[0]
+    return list_of_ids, address
 
 
 def get_stuffs(json_stuffs, field, field2=""):
@@ -146,7 +149,7 @@ def scrape_imdb_page(url):
 
 
 def main():
-    entries_to_scrape = 1000
+    entries_to_scrape = 20000
     no_of_pages = entries_to_scrape // 50
     base_url = "http://www.imdb.com"
     imdb_ids = []
