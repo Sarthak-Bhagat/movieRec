@@ -1,6 +1,5 @@
 import concurrent.futures
 import json
-
 import numpy as np
 import psycopg2
 import requests
@@ -13,14 +12,13 @@ from tqdm import tqdm, trange
 from apiCreds import key
 
 global connection
+skipped = 0
 try:
-    connection = psycopg2.connect(user='PyCharm',
-                                  password='123456',
-                                  host="127.0.0.1",
-                                  port=5432,
+    connection = psycopg2.connect(user="PyCharm",
+                                  password="123456",
                                   database="Movie Rec")
 
-    # Create a cursor to perform database operations
+    # Creates a cursor to perform database operations
     cursor = connection.cursor()
     print("PostgreSQL server information")
     print(connection.get_dsn_parameters(), "\n")
@@ -34,18 +32,9 @@ except (Exception, Error) as error:
 
 
 def scrape_ids_from_imdb(url):
-    path = '//*[@id="main"]/div/div[1]/div[2]/a/@href'
-    if not url:
-        url = 'http://www.imdb.com/search/title/?year=2005-01-01,2021-12-31&view=simple&start=0'
-        path = '//*[@id="main"]/div/div[1]/div[2]/a/@href'
     tree = html.fromstring(requests.get(url).content)
     list_of_ids = tree.xpath('//*[@id="main"]/div/div[3]/div/div/div[2]/div/div[1]/span/span[2]/a/@href')
-    address = tree.xpath(path)
-    if len(address) == 2:
-        address = address[1]
-    else:
-        address = address[0]
-    return list_of_ids, address
+    return list_of_ids
 
 
 def get_stuffs(json_stuffs, field, field2=""):
@@ -58,6 +47,7 @@ def get_stuffs(json_stuffs, field, field2=""):
 
 
 def scrape_imdb_page(url):
+    global skipped
     page = requests.get(url)
     strainer = SoupStrainer('script', type="application/ld+json")
     soup = BeautifulSoup(page.content, "lxml", parse_only=strainer)
@@ -68,6 +58,7 @@ def scrape_imdb_page(url):
     director_names = []
 
     links = tree.xpath('//*[@id="titleDetails"]/div[1]/a/@href')
+    links = [i.replace("'", "\\'") for i in links]
     keywords = tree.xpath('//*[@id="titleStoryLine"]/div[2]/a/span/text()')
     isMovie = 'True' if get_stuffs(json_stuffs, "@type") == 'Movie' else 'False'
     title = get_stuffs(json_stuffs, "name").replace("'", "\\'")
@@ -86,30 +77,42 @@ def scrape_imdb_page(url):
     tmdb_id = None
     tmdb_rating = 0
     tmdb_rating_count = 0
+    date_published = '1970-01-01' if date_published == '' else date_published
 
     genre = [genre] if isinstance(genre, str) else genre
 
     if isinstance(directors, dict):
-        s = str(directors['name'])
-        s = s.replace("'", "\\'")
-        director_names.append(s)
-    elif isinstance(directors, list):
-        for director in directors:
-            s = str(director['name'])
+        try:
+            s = str(directors['name'])
             s = s.replace("'", "\\'")
             director_names.append(s)
+        except TypeError:
+            pass
+    elif isinstance(directors, list):
+        for director in directors:
+            try:
+                s = str(director['name'])
+                s = s.replace("'", "\\'")
+                director_names.append(s)
+            except TypeError:
+                pass
 
     if isinstance(creators, list):
         for creator in creators:
             try:
-                director_names.append(creator['name'])
+                s = str(creator['name'])
+                s = s.replace("'", "\\'")
+                director_names.append(s)
             except KeyError:
                 continue
 
     for i in actors:
-        s = str(i['name'])
-        s = s.replace("'", "\\'")
-        actor_names.append(s)
+        try:
+            s = str(i['name'])
+            s = s.replace("'", "\\'")
+            actor_names.append(s)
+        except TypeError:
+            pass
 
     id_type = 'movie' if isMovie == 'True' else 'tv'
     api_link = f'https://api.themoviedb.org/3/find/{imdb_id}?api_key={key}&language=en-US&external_source=imdb_id'
@@ -135,39 +138,35 @@ def scrape_imdb_page(url):
     director_names = ",".join(director_names)
     keywords = ",".join(keywords).replace("'", "\\'")
     links = ",".join(links)
-    # columns = ['IMDB ID', 'Title', 'Is a Movie', 'Genre', 'Actors', 'Director', 'Description', 'Date Published',
-    #            'Keywords', 'Number of Ratings', 'Rating', 'External links', 'TMDB ID', 'TMDB Rating',
-    #            'TMDB Rating Count', "Image URL"]
 
     with connection.cursor() as cur:
         try:
-            cur.execute(
-                f"""INSERT INTO "Everything" ("IMDB ID", "TMDB Rating Count", "TMDB Rating", "Ratings", "Number of Ratings", "Image URL", "External Links", "Keywords", "Date Published", "Directors", "Actors", "Genre", "isMovie", "Title", "Plot", "TMDB ID") VALUES ('{imdb_id}', {tmdb_rating_count}, {tmdb_rating}, {rating_value}, {total_ratings}, '{image_url}', '{links}', E'{keywords}', '{date_published}', E'{director_names}', E'{actor_names}', '{genre}', {isMovie}, E'{title}', E'{description}', '{tmdb_id}') ON CONFLICT DO NOTHING ;""")
-        except:
-            pass
-        connection.commit()
+            cmd = f"""INSERT INTO "Everything" ("IMDB ID", "TMDB Rating Count", "TMDB Rating", "Ratings", "Number of Ratings", "Image URL", "External Links", "Keywords", "Date Published", "Directors", "Actors", "Genre", "isMovie", "Title", "Plot", "TMDB ID") VALUES ('{imdb_id}', {tmdb_rating_count}, {tmdb_rating}, {rating_value}, {total_ratings}, '{image_url}', E'{links}', E'{keywords}', '{date_published}', E'{director_names}', E'{actor_names}', '{genre}', {isMovie}, E'{title}', E'{description}', '{tmdb_id}') ON CONFLICT DO NOTHING ;"""
+            cur.execute(cmd)
+            connection.commit()
+        except psycopg2.errors.InFailedSqlTransaction:
+            skipped += 1
+            print(skipped)
 
 
 def main():
-    entries_to_scrape = 20000
-    no_of_pages = entries_to_scrape // 50
+    entries_to_scrape = 1000
     base_url = "http://www.imdb.com"
     imdb_ids = []
-    imdb_links = []
-    addr = None
-
-    for _ in trange(no_of_pages):
-        # TODO mulltithread the first 200 pages
-        scraped_ids, addr = scrape_ids_from_imdb(addr)
-        addr = base_url + addr
-        imdb_ids.append(scraped_ids)
-
-    imdb_ids = np.array(imdb_ids).flatten()
-    for ID in imdb_ids:
-        imdb_links.append(base_url + ID)
+    ent = entries_to_scrape
+    adr = [f'http://www.imdb.com/search/title/?year={year}-01-01,{year}-12-31&view=simple&start={i}' for i in
+           range(0, ent, 50) for year in range(2000, 2021)]
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        _ = list(tqdm(executor.map(scrape_imdb_page, imdb_links), total=entries_to_scrape))
+        results = list(tqdm(executor.map(scrape_ids_from_imdb, adr), total=len(adr)))
+        for result in results:
+            imdb_ids.append(result)
+
+    imdb_ids = np.array(imdb_ids).flatten()
+    imdb_links = [str(base_url+ID) for ID in imdb_ids]
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        _ = list(tqdm(executor.map(scrape_imdb_page, imdb_links), total=len(adr)*50))
 
     if connection:
         cursor.close()
